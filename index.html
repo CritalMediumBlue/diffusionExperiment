@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brownian Motion</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+            height: 100vh;
+            background: #ffffff;
+        }
+        canvas {
+            border: 3px solid #04d10e;
+            background: #ffffff00;
+            margin-left: 0px;
+        }
+        #plot {
+            width: 800px;
+            height: 600px;
+        }
+        a {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            background: #04d10e;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+        }
+        a:hover {
+            background: #03a00c;
+        }
+    </style>
+</head>
+<body>
+    <a href="index2.html">Multiple Particles →</a>
+    <canvas id="canvas" width="800" height="600"></canvas>
+    <div id="plot"></div>
+    <div id="info" style="position: absolute; bottom: 20px; left: 20px; background: rgba(255, 255, 255, 0.8); padding: 10px; border-radius: 5px; font-family: Arial, sans-serif;">
+        <strong>Controls:</strong><br>
+        Press 's' to Start/Pause<br>
+        Press 'r' to Reset<br>
+        Press 'a' to Toggle Accurate Model <br>
+        Press 'd' to execute single step<br>
+        <br>
+        <strong>Status:</strong> Paused<br>
+        <strong>Model:</strong> Simple
+    </div>
+    
+    <script>
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 's'){
+                paused = !paused;
+                // Update info div to tell the user the current state
+                infoDiv.innerHTML = `<strong>Controls:</strong><br>
+                Press 's' to ${paused ? 'Start' : 'Pause'}<br>
+                Press 'r' to Reset<br>
+                Press 'a' to Toggle Accurate Model<br>
+                Press 'd' to execute single step<br>
+                <br>
+                <strong>Status:</strong> ${paused ? 'Paused' : 'Running'}<br>
+                <strong>Model:</strong> ${accuratemodel ? 'Accurate' : 'Simple'}`;
+            }
+            if (e.key === 'r'){
+                // Reset particle position
+                x = canvas.width / 2;
+                y = canvas.height / 2;
+                timeSteps = 0;
+                highDiffusionRegion = 0;
+                lowDiffusionRegion = 0;
+            }
+            if (e.key === 'a'){
+                accuratemodel = !accuratemodel;
+                // Update info div to tell the user the current model
+                infoDiv.innerHTML = `<strong>Controls:</strong><br>
+                Press 's' to ${paused ? 'Start' : 'Pause'}<br>
+                Press 'r' to Reset<br>
+                Press 'a' to Toggle Accurate Model<br>
+                Press 'd' to execute single step<br>
+                <br>
+                <strong>Status:</strong> ${paused ? 'Paused' : 'Running'}<br>
+                <strong>Model:</strong> ${accuratemodel ? 'Accurate' : 'Simple'}`;  
+
+            }
+            if (e.key === 'd'){
+                singleStep();
+            }
+        });
+
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const infoDiv = document.getElementById('info');
+        let paused= true;
+        let accuratemodel = false;
+        function gaussian(mean, stdDev) {
+            let u1 = Math.random();
+            let u2 = Math.random();
+            let z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+            let z1 = Math.sqrt(-2.0 * Math.log(u1)) * Math.sin(2.0 * Math.PI * u2);
+            return [z0 * stdDev + mean, z1 * stdDev + mean];
+        }
+        
+        // Particle properties
+        let x = canvas.width / 2;
+        let y = canvas.height / 2;
+        const radius = 5;
+        let highDiffusionRegion = 0;
+        let lowDiffusionRegion = 0;
+        let timeSteps = 0;
+        const Dhigh = 20
+        const Dlow = Dhigh/2
+        const dt = 1;
+        let sd = Math.sqrt(2*Dhigh*dt);
+        const trailLength = 2;
+        const lastXPositions = new Float32Array(trailLength);
+        const lastYPositions = new Float32Array(trailLength);
+        
+        function animate() {
+            if(!paused){
+                singleStep();
+       }
+
+            requestAnimationFrame(animate);
+        
+    }
+
+    function singleStep() {
+
+            timeSteps++;
+            let previousX = x;
+            let previousY = y;
+            let currentRegion 
+            if (x < canvas.width / 4 || x > 3 * canvas.width / 4) {
+                sd = Math.sqrt(2*Dlow*dt);
+                lowDiffusionRegion++;
+                currentRegion = 'low';
+            } else {
+                sd = Math.sqrt(2*Dhigh*dt);
+                highDiffusionRegion++;
+                currentRegion = 'high';
+            }
+            const [gx, gy] = gaussian(0, 1);
+            let [dx, dy] = [gx * sd, gy * sd];
+
+            x = ((x + dx) % canvas.width + canvas.width) % canvas.width;
+            y = ((y + dy) % canvas.height + canvas.height) % canvas.height;
+
+
+            const nextRegion = x < canvas.width / 4 || x > 3 * canvas.width / 4 ? 'low' : 'high';
+
+            if (currentRegion !== nextRegion && accuratemodel) {
+                const distanceToBoundary1 = x - canvas.width / 4;
+                const distanceToBoundary2 = x - 3 * canvas.width / 4;
+                const distanceToBoundary = Math.min( //this is deltaXfn
+                    Math.abs(x - canvas.width / 4),
+                    Math.abs(x - 3 * canvas.width / 4)
+                );
+
+                const Df = nextRegion === 'high' ? Dhigh : Dlow;
+                const Di = currentRegion === 'high' ? Dhigh : Dlow;
+                const dtModified = dt - Math.pow(distanceToBoundary/gx, 2) / (2 * Di);
+                dxf = Math.sqrt(2*Df *dtModified) * gx;
+                dyf = Math.sqrt(2*Df *dtModified) * gy;
+                x = previousX + dxf;
+                y = previousY + dyf;
+                console.log("Crossing boundary, distance to boundary: " + distanceToBoundary);
+                
+            }
+
+            lastXPositions[timeSteps % trailLength] = x;
+            lastYPositions[timeSteps % trailLength] = y;
+
+            if(timeSteps % 10 === 0) {
+                updateHistogram();
+            }
+
+            
+            // Clear canvas
+            ctx.fillStyle = 'rgba(10, 50, 100, 1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'rgba(100, 50, 10, 1)';
+            ctx.fillRect(canvas.width/4, 0, canvas.width/2, canvas.height);
+            
+            // Draw particle
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fillStyle = '#00ff88';
+            ctx.fill();
+
+            // Draw trail
+            for (let i = 0; i < trailLength; i++) {
+                const index = (timeSteps - i + trailLength) % trailLength;
+                const red = (trailLength - i-1)  * 255;
+                ctx.beginPath();
+                ctx.arc(lastXPositions[index], lastYPositions[index], radius, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${red}, ${255 - red}, 255)`;
+                ctx.fill();
+            }
+    
+    }
+
+        function updateHistogram() {
+            const data = [{
+                x: ['High Diffusion', 'Low Diffusion'],
+                y: [highDiffusionRegion/timeSteps, lowDiffusionRegion/timeSteps],
+                type: 'bar',
+                marker: {
+                    color: ['rgba(100, 50, 10, 1)', 'rgba(10, 50, 100, 1)']
+                }
+            }];
+
+            const layout = {
+                title: 'Time Spent in Each Region. Total Time Steps: ' + timeSteps,
+                yaxis: { title: 'Time Steps' },
+                xaxis: { title: 'Region' }
+            };
+
+            Plotly.newPlot('plot', data, layout);
+            
+        }
+
+
+        
+    
+        
+        animate();
+    </script>
+</body>
+</html>
