@@ -13,7 +13,7 @@
             align-items: center;
             gap: 20px;
             height: 100vh;
-            background: #ffffff;
+            background: #dbf5ff;
         }
         canvas {
             border: 3px solid #04d10e;
@@ -27,7 +27,7 @@
         a {
             position: absolute;
             top: 20px;
-            right: 20px;
+            left: 20px;
             padding: 10px 20px;
             background: #04d10e;
             color: white;
@@ -41,23 +41,91 @@
     </style>
 </head>
 <body>
-    <a href="index2.html">Multiple Particles →</a>
-    <canvas id="canvas" width="800" height="600"></canvas>
-    <div id="plot"></div>
+    <canvas id="canvas" width="1100" height="900" style="position: absolute; left:20px; top:20px;"></canvas>
+    <div id="plot" style="position: absolute; top: 20px; right: 20px; width: 700px; height: 500px; border: 3px solid #04d10e; background: #ffffff;"></div>
     <div id="info" style="position: absolute; bottom: 20px; left: 20px; background: rgba(255, 255, 255, 0.8); padding: 10px; border-radius: 5px; font-family: Arial, sans-serif;">
-        <strong>Controls:</strong><br>
-        Press 's' to Start/Pause<br>
-        Press 'r' to Reset<br>
-        Press 'a' to Toggle Accurate Model <br>
-        Press 'd' to execute single step<br>
-        <br>
-        <strong>Status:</strong> Paused<br>
-        <strong>Model:</strong> Simple
     </div>
-    
-    <script>
+	<div id="convergencePlot" style="position: absolute; bottom: 20px; right: 20px; width: 700px; height: 500px; border: 3px solid #04d10e; background: #ffffff;"></div>
 
-        window.addEventListener('keydown', (e) => {
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const infoDiv = document.getElementById('info');
+        let accuratemodel = false;
+
+        function gaussian(mean, stdDev) {
+            let u1 = Math.random();
+            let u2 = Math.random();
+            let z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+            let z1 = Math.sqrt(-2.0 * Math.log(u1)) * Math.sin(2.0 * Math.PI * u2);
+            return [z0 * stdDev + mean, z1 * stdDev + mean];
+        }
+        
+	let plotData = [{
+  	x: ['High Diffusion', 'Low Diffusion'],
+  	y: [0, 0],
+  	type: 'bar',
+  	marker: {
+    	color: ['rgba(100, 50, 10, 1)', 'rgba(10, 50, 100, 1)']
+  	}
+	}];
+
+	let plotLayout = {
+  	title: 'Number of Particles in Each Region',
+  	yaxis: { title: 'Number of Particles', rangemode: 'tozero' },
+  	xaxis: { title: 'Region' }
+	};
+
+	let plotConvergence = [{
+  	x: [],
+  	y: [],
+  	type: 'scatter',
+  	mode: 'lines+markers',
+  	name: 'Convergence',
+  	marker: { color: 'rgba(0, 150, 255, 0.4)' }
+	}, {
+  	x: [],
+  	y: [],
+  	type: 'scatter',
+  	mode: 'lines',
+  	name: '50-step Moving Average',
+  	line: { color: 'rgba(255, 100, 0, 0.8)', width: 3 }
+	}];
+
+	let convergenceLayout = {
+        // make y axis logarithmic
+  	title: 'Convergence of Average Proportion in High Diffusion Region',
+  	yaxis: { title: 'Difference in Proportion', rangemode: 'tozero' },
+
+  	xaxis: { title: 'Update Steps' }
+	};
+
+	Plotly.newPlot('plot', plotData, plotLayout);
+    Plotly.newPlot('convergencePlot', plotConvergence, convergenceLayout);
+        // Particle properties
+        const NUM_PARTICLES = 10000; // Change this number to add more/fewer particles
+        const radius = 1;
+        let highDiffusionRegion = 0;
+        let lowDiffusionRegion = 0;
+        let timeSteps = 0;
+        let paused= true;
+        const Dhigh = 50;
+        const Dlow = Dhigh / 3;
+        const dt = 0.1;
+        let averageHigh = 0.5;
+        let averagevalues = [];
+	const convergenceArray = [];
+
+        // Create array of particles
+        const particles = [];
+        for (let i = 0; i < NUM_PARTICLES; i++) {
+            particles.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height
+            });
+        }
+
+                window.addEventListener('keydown', (e) => {
             if (e.key === 's'){
                 paused = !paused;
                 // Update info div to tell the user the current state
@@ -72,11 +140,24 @@
             }
             if (e.key === 'r'){
                 // Reset particle position
-                x = canvas.width / 2;
-                y = canvas.height / 2;
+                particles.forEach(particle => {
+                    particle.x = Math.random() * canvas.width;
+                    particle.y = Math.random() * canvas.height;
+                });
                 timeSteps = 0;
                 highDiffusionRegion = 0;
                 lowDiffusionRegion = 0;
+                // Reset convergence tracking
+                averageHigh = 0.5;
+                convergenceArray.length = 0;
+                // Clear plots
+                plotData[0].y = [0, 0];
+                Plotly.redraw('plot');
+                plotConvergence[0].x = [];
+                plotConvergence[0].y = [];
+                plotConvergence[1].x = [];
+                plotConvergence[1].y = [];
+                Plotly.redraw('convergencePlot');
             }
             if (e.key === 'a'){
                 accuratemodel = !accuratemodel;
@@ -95,142 +176,176 @@
                 singleStep();
             }
         });
-
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
-        const infoDiv = document.getElementById('info');
-        let paused= true;
-        let accuratemodel = false;
-        function gaussian(mean, stdDev) {
-            let u1 = Math.random();
-            let u2 = Math.random();
-            let z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
-            let z1 = Math.sqrt(-2.0 * Math.log(u1)) * Math.sin(2.0 * Math.PI * u2);
-            return [z0 * stdDev + mean, z1 * stdDev + mean];
-        }
-        
-        // Particle properties
-        let x = canvas.width / 2;
-        let y = canvas.height / 2;
-        const radius = 5;
-        let highDiffusionRegion = 0;
-        let lowDiffusionRegion = 0;
-        let timeSteps = 0;
-        const Dhigh = 20
-        const Dlow = Dhigh/2
-        const dt = 1;
-        let sd = Math.sqrt(2*Dhigh*dt);
-        const trailLength = 2;
-        const lastXPositions = new Float32Array(trailLength);
-        const lastYPositions = new Float32Array(trailLength);
         
         function animate() {
+
             if(!paused){
                 singleStep();
-       }
-
+            }
             requestAnimationFrame(animate);
-        
-    }
-
-    function singleStep() {
-
+        }
+        function singleStep() {
+            lowDiffusionRegion = 0;
+            highDiffusionRegion = 0;
             timeSteps++;
-            let previousX = x;
-            let previousY = y;
-            let currentRegion 
-            if (x < canvas.width / 4 || x > 3 * canvas.width / 4) {
-                sd = Math.sqrt(2*Dlow*dt);
-                lowDiffusionRegion++;
-                currentRegion = 'low';
-            } else {
-                sd = Math.sqrt(2*Dhigh*dt);
-                highDiffusionRegion++;
-                currentRegion = 'high';
-            }
-            const [gx, gy] = gaussian(0, 1);
-            let [dx, dy] = [gx * sd, gy * sd];
-
-            x = ((x + dx) % canvas.width + canvas.width) % canvas.width;
-            y = ((y + dy) % canvas.height + canvas.height) % canvas.height;
-
-
-            const nextRegion = x < canvas.width / 4 || x > 3 * canvas.width / 4 ? 'low' : 'high';
-
-            if (currentRegion !== nextRegion && accuratemodel) {
-                const distanceToBoundary1 = x - canvas.width / 4;
-                const distanceToBoundary2 = x - 3 * canvas.width / 4;
-                const distanceToBoundary = Math.min( //this is deltaXfn
-                    Math.abs(x - canvas.width / 4),
-                    Math.abs(x - 3 * canvas.width / 4)
-                );
-
-                const Df = nextRegion === 'high' ? Dhigh : Dlow;
-                const Di = currentRegion === 'high' ? Dhigh : Dlow;
-                const dtModified = dt - Math.pow(distanceToBoundary/gx, 2) / (2 * Di);
-                dxf = Math.sqrt(2*Df *dtModified) * gx;
-                dyf = Math.sqrt(2*Df *dtModified) * gy;
-                x = previousX + dxf;
-                y = previousY + dyf;
-                console.log("Crossing boundary, distance to boundary: " + distanceToBoundary);
-                
-            }
-
-            lastXPositions[timeSteps % trailLength] = x;
-            lastYPositions[timeSteps % trailLength] = y;
-
-            if(timeSteps % 10 === 0) {
-                updateHistogram();
-            }
-
             
-            // Clear canvas
+            
+            particles.forEach(particle => {
+                let currentRegion 
+                const previousX = particle.x;
+                const previousY = particle.y;
+                let Di; // initial diffusion coefficient
+                let Df; // final diffusion coefficient
+                if (previousX < canvas.width / 4 || previousX > 3 * canvas.width / 4) {
+                    Di = Dlow;
+                    lowDiffusionRegion++;
+                    currentRegion = 'low';
+                } else {
+                    Di = Dhigh;
+                    highDiffusionRegion++;
+                    currentRegion = 'high';
+                }
+                const sd = Math.sqrt(2*Di*dt);
+                const [gx, gy] = gaussian(0, 1);
+                let [dx, dy] = [gx * sd, gy * sd];
+
+                let finalX = ((previousX + dx) % canvas.width + canvas.width) % canvas.width;
+                let finalY = ((previousY + dy) % canvas.height + canvas.height) % canvas.height;
+                let nextRegion;
+                if (finalX < canvas.width / 4 || finalX > 3 * canvas.width / 4) {
+                    nextRegion = 'low';
+                } else {
+                    nextRegion = 'high';
+                }
+
+                if (currentRegion !== nextRegion && accuratemodel) {
+                    const distanceToBoundary1 = previousX - canvas.width / 4;
+                    const distanceToBoundary2 = previousX - 3 * canvas.width / 4;
+                    const distanceToBoundary = Math.min(
+                        Math.abs(distanceToBoundary1),
+                        Math.abs(distanceToBoundary2)
+                    );
+                    //const closestBoundary = distanceToBoundary === Math.abs(distanceToBoundary1)
+                    //    ? canvas.width / 4
+                    //    : 3 * canvas.width / 4;
+                    const Df = nextRegion === 'high' ? Dhigh : Dlow;
+                    const Di = currentRegion === 'high' ? Dhigh : Dlow;
+                    //const timeOfArrival = Math.pow(distanceToBoundary / gx, 2) / (2 * Di);
+                    //const dtModified = dt - timeOfArrival;
+                    //const dXf= Math.sqrt(2*Df *dtModified) * gx;
+                    //const dYf= Math.sqrt(2*Df *dtModified) * gy;
+
+                    /* finalX = previousX + dXf;
+                    finalY = previousY + dYf;  */
+
+                   /*  const randomSign = (Math.random() < 0.5) ? -1 : 1;
+                    finalX = closestBoundary + dXf*randomSign;
+                    finalY = previousY + dYf;  */
+
+                    const dXf2 = Math.sqrt(2*Df *dt) * gx;
+                    const dYf2 = Math.sqrt(2*Df *dt) * gy;
+                    finalX = previousX + dXf2;
+                    finalY = previousY + dYf2;
+
+
+
+                
+                }
+
+
+                particle.x = finalX;
+                particle.y = finalY;
+                
+            
+            });  
+
+
+          
+            
             ctx.fillStyle = 'rgba(10, 50, 100, 1)';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.fillStyle = 'rgba(100, 50, 10, 1)';
-            ctx.fillRect(canvas.width/4, 0, canvas.width/2, canvas.height);
-            
-            // Draw particle
-            ctx.beginPath();
-            ctx.arc(x, y, radius, 0, Math.PI * 2);
-            ctx.fillStyle = '#00ff88';
-            ctx.fill();
+            ctx.fillRect(canvas.width/4, 0, canvas.width/2, canvas.height); 
+            // Update and draw each particle
+                  // Draw particles
+             let firstParticle  = true;  
+                particles.forEach(particle => {
+                    // Draw particles
+                    if (firstParticle) {
+                        ctx.beginPath();
+                        ctx.arc(particle.x, particle.y, radius*6, 0, Math.PI * 2);
+                        ctx.fillStyle = 'rgba(255, 255, 255, 1)';
+                        ctx.fill();
+                    } else {
+                        ctx.beginPath();
+                        ctx.arc(particle.x, particle.y, radius, 0, Math.PI * 2);
+                        ctx.fillStyle = 'rgba(0, 255, 0, 1)';
+                        ctx.fill();
+                    }
+                    
+                    firstParticle = false;
+                });
 
-            // Draw trail
-            for (let i = 0; i < trailLength; i++) {
-                const index = (timeSteps - i + trailLength) % trailLength;
-                const red = (trailLength - i-1)  * 255;
-                ctx.beginPath();
-                ctx.arc(lastXPositions[index], lastYPositions[index], radius, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(${red}, ${255 - red}, 255)`;
-                ctx.fill();
+            if (timeSteps % 100 === 0) {
+            const newAverageHigh = highDiffusionRegion / NUM_PARTICLES;
+            const convergance = newAverageHigh - averageHigh
+	        convergenceArray.push(convergance );
+                averagevalues.push(newAverageHigh);
+            const average = averagevalues.reduce((sum, val) => sum + val, 0) / averagevalues.length;
+
+            averageHigh = newAverageHigh;
+
+
+               // Clear canvas
+            
+                updatePlot(highDiffusionRegion, lowDiffusionRegion);
+                  // Display average proportion of particles in high diffusion region
+                infoDiv.innerHTML = `<strong>Controls:</strong><br>
+                Press 's' to ${paused ? 'Start' : 'Pause'}<br>
+                Press 'r' to Reset<br>
+                Press 'a' to Toggle Accurate Model<br>
+                Press 'd' to execute single step<br>
+                <br>
+                <strong>Status:</strong> ${paused ? 'Paused' : 'Running'}<br>
+                <strong>Model:</strong> ${accuratemodel ? 'Accurate' : 'Simple'}<br>
+                <strong>Time Steps:</strong> ${timeSteps}<br>
+                <strong>Average Particles in High Diffusion Region:</strong> ${averageHigh.toFixed(5)}, Difference: ${convergance.toFixed(10)}<br>
+                <strong>Average over time:</strong> ${average.toFixed(5)}`;
             }
-    
-    }
-
-        function updateHistogram() {
-            const data = [{
-                x: ['High Diffusion', 'Low Diffusion'],
-                y: [highDiffusionRegion/timeSteps, lowDiffusionRegion/timeSteps],
-                type: 'bar',
-                marker: {
-                    color: ['rgba(100, 50, 10, 1)', 'rgba(10, 50, 100, 1)']
-                }
-            }];
-
-            const layout = {
-                title: 'Time Spent in Each Region. Total Time Steps: ' + timeSteps,
-                yaxis: { title: 'Time Steps' },
-                xaxis: { title: 'Region' }
-            };
-
-            Plotly.newPlot('plot', data, layout);
-            
+           
         }
-
-
         
-    
+	function updatePlot(highDiffusionRegion, lowDiffusionRegion) {
+  		plotData[0].y[0] = highDiffusionRegion;
+  		plotData[0].y[1] = lowDiffusionRegion;
+  		Plotly.redraw('plot'); // or Plotly.react('plot', plotData, plotLayout);
+		
+		// Update convergence plot
+		plotConvergence[0].x.push(timeSteps / 100);
+  		plotConvergence[0].y.push(convergenceArray[convergenceArray.length - 1]);
+		
+		// Calculate 20-step moving average
+		const windowSize = 50;
+		if (convergenceArray.length >= windowSize) {
+			const recentValues = convergenceArray.slice(-windowSize);
+			const movingAvg = recentValues.reduce((sum, val) => sum + val, 0) / windowSize;
+			plotConvergence[1].x.push(timeSteps / 100);
+			plotConvergence[1].y.push(movingAvg);
+		}
+		
+        //only plot last 100 points to avoid overload
+        if (plotConvergence[0].x.length > 150) {
+            plotConvergence[0].x.shift();
+            plotConvergence[0].y.shift();
+			if (plotConvergence[1].x.length > 0) {
+				plotConvergence[1].x.shift();
+				plotConvergence[1].y.shift();
+			}
+        }
+        
+  		Plotly.redraw('convergencePlot');
+	}
+
         
         animate();
     </script>
